@@ -4,3 +4,15 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.egg-info/
+
+# IDE / editor scratch state — no es esencial para el proyecto
+.idea/
+.http/
+
+# docs/ es explicativo/de trabajo, salvo la fuente de verdad de stack
+# (docs/stack-decisions.md), que el CLAUDE.md exige mantener versionada.
+docs/*
+!docs/stack-decisions.md
+
+# Config local de Claude Code (permisos por máquina, no compartida)
+.claude/settings.local.json

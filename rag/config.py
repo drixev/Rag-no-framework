@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     generation_model: str = "claude-sonnet-5"
     retrieval_top_k: int = 4
+    database_url: str
 
     class Config:
         env_file = ".env"
