@@ -14,8 +14,4 @@ __pycache__/
 docs/*
 !docs/stack-decisions.md
 
-# Config local de Claude Code (permisos por máquina, no compartida)
-.claude/settings.local.json
-
-# Instrucciones de proyecto para Claude Code — solo local, no versionada
-.claude/CLAUDE.md
+.claude
