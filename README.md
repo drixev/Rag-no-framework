@@ -1,9 +1,8 @@
 # rag-project
 
-Backend de RAG (proyecto de aprendizaje): Python + FastAPI + uv. Cada módulo
-bajo `rag/` corresponde a un tema del temario. Las decisiones de stack
-(vector DB, chunking, orquestación, re-ranking) están en
-`docs/stack-decisions.md`.
+Backend de RAG: Python + FastAPI + uv. Cada módulo bajo `rag/` corresponde a
+un tema del temario. Las decisiones de stack (vector DB, chunking,
+orquestación, re-ranking) están en `docs/stack-decisions.md`.
 
 ## Setup
 
@@ -50,24 +49,51 @@ curl -X POST localhost:8000/query/sql -H "Content-Type: application/json" \
   -d '{"query": "¿cuántos productos hay agotados?"}'
 ```
 
+## Flujo de trabajo
+
+Dos caminos independientes desde la API hasta la respuesta:
+
+- **No estructurado** (`/query`, `/query/stream`) — `rag/pipeline.py`
+  recupera contexto con `retrieval/retriever.py` (búsqueda híbrida), arma un
+  prompt aumentado y genera la respuesta con Claude
+  (`generation/claude_client.py`). La variante `/query/stream` emite primero
+  un evento `sources` con los chunks recuperados y luego va emitiendo la
+  respuesta en eventos `chunk`, vía SSE.
+- **Estructurado** (`/query/sql`) — `rag/sql/text_to_sql.py` traduce la
+  pregunta a SQL, valida que sea de solo lectura y la ejecuta contra
+  `productos`. No pasa por retrieval ni por el LLM de generación: es texto a
+  SQL directo.
+
+El cliente decide qué endpoint usar según el tipo de pregunta; no hay
+enrutamiento automático entre ambos flujos.
+
+## Decisión de ingesta
+
+La indexación offline (`scripts/ingest.py` → `ingestion/build_index.py`) es
+incremental: cada corrida hashea el texto canónico de cada fuente, lo
+compara contra lo ya indexado y solo trocea/reembebe lo que cambió. Se
+apoya en tres piezas:
+
+1. **Incremental por hash** — hashea el texto canónico de cada fuente y
+   compara contra `indexed_sources`; solo trocea y reembebe lo que cambió.
+2. **Batching de embeddings** — `embeddings/openai_embeddings.py` manda los
+   textos a OpenAI en lotes, no en un solo request.
+3. **Fuentes estructuradas configurables** —
+   `ingestion/build_index.py::STRUCTURED_SOURCES` es una lista declarativa
+   de tablas (query + serializador); sumar una tabla nueva no toca el
+   pipeline de indexado.
+
+Sigue habiendo una lectura completa de la fuente en cada corrida, para poder
+comparar hashes. En tablas de millones de filas el cuello de botella pasa a
+estar ahí, no en el reembebido — filtrar por `updated_at` o particionar la
+lectura son los próximos pasos si el volumen lo justifica.
+
 ## Arquitectura de retrieval
 
 `rag/pipeline.py` recupera contexto vía `retrieval/retriever.py`, que delega
-en `retrieval/index_store.py` (pgvector + pg_search). La indexación offline
-(`scripts/ingest.py` → `ingestion/build_index.py`) trocea cada fuente
-(`ingestion/chunking.py`, fijo con overlap), genera embeddings y los guarda
-en `chunks` sin distinguir origen: productos y documentos son intercambiables
-para el retrieval (Tema 7).
-
-La indexación escala de tres formas:
-
-1. **Incremental** — hashea el texto de cada fuente y solo re-embebe lo que
-   cambió (bookkeeping en `indexed_sources`).
-2. **Batching** — `embeddings/openai_embeddings.py` manda los textos a
-   OpenAI en lotes, no en un solo request.
-3. **Fuentes configurables** — `ingestion/build_index.py::STRUCTURED_SOURCES`
-   es una lista declarativa de tablas (query + serializador); sumar una
-   tabla nueva no toca el pipeline.
+en `retrieval/index_store.py` (pgvector + pg_search). Los chunks se guardan
+en la tabla `chunks` sin distinguir origen: productos y documentos son
+intercambiables para el retrieval (Tema 7).
 
 `retrieval/index_store.query_hybrid` fusiona ranking denso (pgvector,
 distancia coseno) y BM25 (pg_search) con Reciprocal Rank Fusion, en una sola
